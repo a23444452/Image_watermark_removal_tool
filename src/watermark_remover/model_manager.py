@@ -17,7 +17,7 @@ class ModelManager:
     MODELS = {
         "lama": {
             "filename": "big-lama.pt",
-            "url": "https://huggingface.co/smartywu/big-lama/resolve/main/big-lama.pt",
+            "url": "https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt",
             "size": 200 * 1024 * 1024,  # 約 200 MB
         }
     }
