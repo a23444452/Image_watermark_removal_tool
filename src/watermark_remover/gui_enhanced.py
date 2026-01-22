@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QToolBar,
     QMenuBar,
+    QComboBox,
 )
 from PySide6.QtCore import Qt, QRect, QPoint, QThread, Signal, QMimeData
 from PySide6.QtGui import (
@@ -36,7 +37,8 @@ from PySide6.QtGui import (
     QDropEvent,
 )
 
-from .image_processor import ImageProcessor
+from .image_processor import ImageProcessor, InpaintMethod
+from .model_manager import ModelManager
 
 
 class ProcessingThread(QThread):
@@ -45,35 +47,76 @@ class ProcessingThread(QThread):
     finished = Signal(np.ndarray)
     error = Signal(str)
     progress = Signal(int)
+    fallback = Signal(str)
 
     def __init__(
         self,
         processor: ImageProcessor,
         mask: np.ndarray | None,
         selection: tuple[int, int, int, int] | None,
+        method: InpaintMethod = None,
     ):
         super().__init__()
         self.processor = processor
         self.mask = mask
         self.selection = selection
+        self.method = method
 
     def run(self):
         """執行處理"""
         try:
-            self.progress.emit(30)
+            self.progress.emit(10)
+
+            def progress_cb(value):
+                self.progress.emit(value)
+
+            def fallback_cb(msg):
+                self.fallback.emit(msg)
 
             if self.mask is not None:
-                result = self.processor.remove_watermark(self.mask)
+                result = self.processor.remove_watermark(
+                    self.mask,
+                    method=self.method,
+                    progress_callback=progress_cb,
+                    fallback_callback=fallback_cb,
+                )
             elif self.selection:
                 x, y, width, height = self.selection
-                result = self.processor.remove_watermark_by_region(x, y, width, height)
+                result = self.processor.remove_watermark_by_region(
+                    x, y, width, height,
+                    method=self.method,
+                    progress_callback=progress_cb,
+                    fallback_callback=fallback_cb,
+                )
             else:
                 self.error.emit("未選擇區域")
                 return
 
-            self.progress.emit(100)
             self.finished.emit(result)
 
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class ModelDownloadThread(QThread):
+    """下載模型的背景執行緒"""
+
+    finished = Signal()
+    error = Signal(str)
+    progress = Signal(int, int)  # downloaded, total
+
+    def __init__(self, model_manager):
+        super().__init__()
+        self.model_manager = model_manager
+
+    def run(self):
+        """執行下載"""
+        try:
+            self.model_manager.download_model(
+                "lama",
+                progress_callback=lambda downloaded, total: self.progress.emit(downloaded, total),
+            )
+            self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
 
@@ -249,8 +292,11 @@ class WatermarkRemoverGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.processor = ImageProcessor()
+        self.model_manager = ModelManager()
         self.current_image: np.ndarray | None = None
         self.detected_mask: np.ndarray | None = None
+        self.lama_available = False
+        self.current_method = InpaintMethod.LAMA
 
         # 歷史記錄（用於撤銷/重做）
         self.history: deque = deque(maxlen=10)
@@ -258,6 +304,9 @@ class WatermarkRemoverGUI(QMainWindow):
 
         self.setup_ui()
         self.setup_shortcuts()
+
+        # 啟動時檢查模型
+        self.check_model_on_startup()
 
     def setup_ui(self):
         """設定 UI 元件"""
@@ -325,6 +374,26 @@ class WatermarkRemoverGUI(QMainWindow):
         zoom_layout.addStretch()
 
         main_layout.addLayout(zoom_layout)
+
+        # 算法選擇列
+        algorithm_layout = QHBoxLayout()
+        algorithm_layout.addWidget(QLabel("修復算法:"))
+
+        self.algorithm_combo = QComboBox()
+        self.algorithm_combo.addItems([
+            "LaMa (AI) - 推薦，適合大面積",
+            "NS - 快速，適合小面積",
+            "Telea - 最快",
+            "Hybrid - 混合",
+        ])
+        self.algorithm_combo.setCurrentIndex(0)
+        self.algorithm_combo.currentIndexChanged.connect(self.on_algorithm_changed)
+        self.algorithm_combo.setMinimumWidth(250)
+        algorithm_layout.addWidget(self.algorithm_combo)
+
+        algorithm_layout.addStretch()
+
+        main_layout.addLayout(algorithm_layout)
 
         # 狀態列
         self.status_bar = QStatusBar()
@@ -610,6 +679,98 @@ class WatermarkRemoverGUI(QMainWindow):
         self.detected_mask = mask
         self.image_label.clear_selection()
 
+    def on_algorithm_changed(self, index):
+        """算法選擇改變"""
+        methods = [InpaintMethod.LAMA, InpaintMethod.NS, InpaintMethod.TELEA, InpaintMethod.HYBRID]
+        self.current_method = methods[index]
+        self.processor.default_method = self.current_method
+        self.status_bar.showMessage(f"已切換至 {self.algorithm_combo.currentText().split(' - ')[0]} 算法")
+
+    def check_model_on_startup(self):
+        """啟動時檢查模型"""
+        if self.model_manager.is_model_downloaded("lama"):
+            self.lama_available = True
+            self.status_bar.showMessage("LaMa 模型已就緒，請開啟圖像")
+        else:
+            reply = QMessageBox.question(
+                self,
+                "下載 AI 模型",
+                "LaMa AI 模型尚未下載（約 200 MB）。\n"
+                "此模型可大幅提升大面積浮水印的移除品質。\n\n"
+                "是否立即下載？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                self.download_model_with_progress()
+            else:
+                self.lama_available = False
+                self.update_algorithm_menu()
+                self.status_bar.showMessage("請開啟圖像或拖放圖像檔案到視窗中")
+
+    def download_model_with_progress(self):
+        """顯示下載進度"""
+        self.download_progress = QProgressDialog(
+            "正在下載 LaMa 模型...\n這可能需要幾分鐘",
+            "取消",
+            0,
+            100,
+            self,
+        )
+        self.download_progress.setWindowTitle("下載模型")
+        self.download_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.download_progress.setMinimumDuration(0)
+        self.download_progress.setValue(0)
+
+        self.download_thread = ModelDownloadThread(self.model_manager)
+        self.download_thread.progress.connect(self.on_download_progress)
+        self.download_thread.finished.connect(self.on_download_finished)
+        self.download_thread.error.connect(self.on_download_error)
+        self.download_thread.start()
+
+    def on_download_progress(self, downloaded: int, total: int):
+        """下載進度更新"""
+        if total > 0:
+            percent = int(downloaded / total * 100)
+            self.download_progress.setValue(percent)
+            mb_downloaded = downloaded / (1024 * 1024)
+            mb_total = total / (1024 * 1024)
+            self.download_progress.setLabelText(
+                f"正在下載 LaMa 模型...\n{mb_downloaded:.1f} / {mb_total:.1f} MB"
+            )
+
+    def on_download_finished(self):
+        """下載完成"""
+        self.download_progress.close()
+        self.lama_available = True
+        self.update_algorithm_menu()
+        QMessageBox.information(self, "成功", "LaMa 模型下載完成！")
+        self.status_bar.showMessage("LaMa 模型已就緒，請開啟圖像")
+
+    def on_download_error(self, error: str):
+        """下載錯誤"""
+        self.download_progress.close()
+        QMessageBox.critical(self, "錯誤", f"下載模型失敗：{error}")
+        self.lama_available = False
+        self.update_algorithm_menu()
+
+    def update_algorithm_menu(self):
+        """更新算法選單狀態"""
+        if not self.lama_available:
+            model = self.algorithm_combo.model()
+            item = model.item(0)
+            item.setEnabled(False)
+            self.algorithm_combo.setItemText(0, "LaMa (AI) - 未下載")
+            self.algorithm_combo.setCurrentIndex(1)
+            self.current_method = InpaintMethod.NS
+            self.processor.default_method = InpaintMethod.NS
+        else:
+            model = self.algorithm_combo.model()
+            item = model.item(0)
+            item.setEnabled(True)
+            self.algorithm_combo.setItemText(0, "LaMa (AI) - 推薦，適合大面積")
+
     def remove_watermark(self):
         """移除浮水印（使用進度對話框）"""
         if self.current_image is None:
@@ -634,7 +795,10 @@ class WatermarkRemoverGUI(QMainWindow):
 
         # 建立處理執行緒
         self.processing_thread = ProcessingThread(
-            self.processor, self.detected_mask, selection
+            self.processor,
+            self.detected_mask,
+            selection,
+            self.current_method,  # 傳遞當前選擇的算法
         )
 
         self.processing_thread.progress.connect(progress.setValue)
@@ -643,6 +807,9 @@ class WatermarkRemoverGUI(QMainWindow):
         )
         self.processing_thread.error.connect(
             lambda error: self.on_processing_error(error, progress)
+        )
+        self.processing_thread.fallback.connect(
+            lambda msg: self.status_bar.showMessage(msg)
         )
 
         self.processing_thread.start()
