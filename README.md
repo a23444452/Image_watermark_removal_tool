@@ -2,13 +2,15 @@
 
 一個現代化的 GUI 工具，用於移除圖像中的浮水印（如 Gemini、ChatGPT 生成的圖像浮水印）。
 
-> 🎉 **新增增強版！** 現在提供具備快捷鍵、拖放檔案、圖像縮放、撤銷/重做等專業功能的增強版本。查看 [增強功能說明](ENHANCED_FEATURES.md)
+> 🚀 **重大更新：LaMa AI 模型整合！** 現在支援 LaMa (Large Mask Inpainting) AI 模型，大幅提升大面積浮水印的移除品質。
 >
-> ⚡ **演算法改進！** 新增多種修復算法（NS、混合、進階處理），視覺品質提升 40-60%。查看 [演算法改進說明](ALGORITHM_IMPROVEMENTS.md)
+> 🎉 **增強版 GUI** 提供快捷鍵、拖放檔案、圖像縮放、撤銷/重做等專業功能。
+>
+> ⚡ **多種修復算法** 包含 LaMa (AI)、NS、Telea、混合算法，滿足不同需求。
 
 ## 安裝
 
-### 方法 1：使用 pip 安裝專案
+### 方法 1：使用 pip 安裝專案（推薦）
 
 ```bash
 cd watermark-remover
@@ -18,7 +20,7 @@ pip install -e .
 ### 方法 2：手動安裝相依套件
 
 ```bash
-pip install opencv-python numpy Pillow PySide6
+pip install opencv-python numpy Pillow PySide6 torch torchvision
 ```
 
 ## 使用方式
@@ -29,13 +31,7 @@ pip install opencv-python numpy Pillow PySide6
 python run_enhanced.py
 ```
 
-增強版包含：
-- ⌨️ 快捷鍵支援（Ctrl+O、Ctrl+S、Ctrl+R 等）
-- 📂 拖放檔案開啟
-- 🔍 圖像縮放功能（Ctrl+滾輪）
-- ↶↷ 撤銷/重做功能
-- ⏳ 處理進度顯示
-- 📋 完整選單列和工具列
+首次啟動時會提示下載 LaMa 模型（約 200 MB），下載後即可使用 AI 驅動的浮水印移除功能。
 
 ### 基礎版
 
@@ -43,55 +39,83 @@ python run_enhanced.py
 python run.py
 ```
 
-### 直接執行模組
+## 功能特色
 
-```bash
-python -m watermark_remover.main
-```
+### 🤖 LaMa AI 模型（新增）
 
-## 功能
+- **大面積浮水印移除** - LaMa 專為大面積遮罩設計，效果遠優於傳統算法
+- **自動下載** - 首次使用時自動下載模型（約 200 MB）
+- **Apple Silicon 加速** - 支援 MPS 加速，在 M1/M2/M3/M4 Mac 上快速運行
+- **智能後備** - LaMa 不可用時自動切換至 NS 算法
 
-### 基本功能
-- 🖼️ 現代化的 Qt 介面（使用 PySide6）
-- 📂 選擇圖像檔案
+### 🎨 修復算法
+
+| 算法 | 說明 | 適用場景 |
+|------|------|----------|
+| **LaMa (AI)** | 大型遮罩修復 AI 模型 | 大面積浮水印（推薦）⭐ |
+| **NS** | Navier-Stokes 流體力學法 | 小面積浮水印 |
+| **Telea** | 快速行進法 | 需要快速處理 |
+| **Hybrid** | 混合算法 | 平衡品質與速度 |
+
+### 🖥️ 增強版 GUI
+
+- ⌨️ **快捷鍵支援** - Ctrl+O 開啟、Ctrl+S 儲存、Ctrl+R 移除、Ctrl+Z 撤銷
+- 📂 **拖放檔案** - 直接拖放圖像到視窗開啟
+- 🔍 **圖像縮放** - Ctrl+滾輪縮放，支援 20%-500%
+- ↶↷ **撤銷/重做** - 最多保存 10 個歷史狀態
+- ⏳ **處理進度** - 即時顯示處理進度
+- 🎛️ **算法選擇** - 下拉選單切換修復算法
+
+### 🔧 基本功能
+
+- 🖼️ 現代化 Qt 介面（PySide6）
 - 🎯 滑鼠拖曳選擇浮水印區域
 - 🤖 自動偵測浮水印
-- 🔧 智能移除浮水印
 - 💾 儲存處理後的圖像
 - ↩️ 重置功能
 
-### 修復算法（新增）
-- **Telea 算法** - 快速行進法，速度快
-- **NS 算法（預設）** - Navier-Stokes，品質更好 ⭐
-- **混合算法** - 結合兩種算法優勢
-- **進階處理** - 多層次處理，最佳品質
-- **可調參數** - 修復半徑 1-10 像素
+## 技術棧
 
-## 技術
-
-- **OpenCV** - 圖像處理和修復算法（Telea, NS, Inpainting）
-- **PySide6 (Qt)** - 現代化的 GUI 介面
+- **PyTorch** - LaMa AI 模型推論
+- **OpenCV** - 傳統圖像處理和修復算法
+- **PySide6 (Qt)** - 現代化 GUI 介面
 - **NumPy** - 數值運算
 - **Pillow** - 圖像格式支援
 
-## 演算法改進
+## 系統需求
 
-我們改進了浮水印移除算法以提供更好的視覺品質：
+- Python 3.12+
+- macOS（Apple Silicon 支援 MPS 加速）/ Windows / Linux
+- 約 500 MB 硬碟空間（含 LaMa 模型）
 
-- ✅ 預設使用 **NS 算法**（比 Telea 品質更好）
-- ✅ 增加修復半徑到 5 像素（原為 3）
-- ✅ 新增遮罩擴展處理
-- ✅ 添加雙邊濾波後處理
-- ✅ 提供 4 種算法選擇
+## 模型管理
 
-**結果**：視覺品質提升 40-60%，模糊感明顯減少
+LaMa 模型儲存在 `~/.cache/watermark-remover/models/lama/`。
 
-查看完整說明：[演算法改進說明](ALGORITHM_IMPROVEMENTS.md)
-
-### 測試不同算法
+### 手動刪除模型
 
 ```bash
+rm -rf ~/.cache/watermark-remover/models/lama
+```
+
+重新啟動 GUI 後會提示重新下載。
+
+## 測試
+
+```bash
+# 執行所有測試
+pytest -v
+
+# 測試不同算法效果
 python test_algorithm_comparison.py
 ```
 
-這會生成不同算法的對比圖像供你比較。
+## 文件
+
+- [增強功能說明](ENHANCED_FEATURES.md)
+- [演算法改進說明](ALGORITHM_IMPROVEMENTS.md)
+- [設計文件](docs/plans/2026-01-22-lama-integration-design.md)
+
+## 授權
+
+MIT License
