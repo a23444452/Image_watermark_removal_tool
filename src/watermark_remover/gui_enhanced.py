@@ -793,10 +793,14 @@ class WatermarkRemoverGUI(QMainWindow):
         progress.setMinimumDuration(0)
         progress.setValue(0)
 
+        # 決定使用哪個遮罩：手動框選優先於自動偵測
+        # 如果有手動框選，則不使用 detected_mask
+        mask_to_use = None if selection else self.detected_mask
+
         # 建立處理執行緒
         self.processing_thread = ProcessingThread(
             self.processor,
-            self.detected_mask,
+            mask_to_use,
             selection,
             self.current_method,  # 傳遞當前選擇的算法
         )
